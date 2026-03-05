@@ -8,18 +8,12 @@ const stats = [
 ];
 
 const activity = [
-  { date: 'Today, 9:14 AM',     title: 'CBC Blood Report uploaded',       sub: 'Lab · Verified ✓',       color: '#667eea' },
-  { date: 'Yesterday, 3:30 PM', title: 'Claim CLM-2847 approved',          sub: '₹1,24,500 processed',    color: '#16a34a' },
-  { date: 'Mar 1, 11:42 AM',    title: 'Dr. Patel accessed ECG records',   sub: 'Apollo Hospital · Logged',color: '#f59e0b' },
-  { date: 'Feb 28',             title: 'Policy renewed — HDFC Health',     sub: 'Valid till Nov 2025',     color: '#8b5cf6' },
+  { date: 'Today, 9:14 AM', title: 'CBC Blood Report uploaded', sub: 'Lab · Verified ✓', color: '#667eea' },
+  { date: 'Yesterday, 3:30 PM', title: 'Claim CLM-2847 approved', sub: '₹1,24,500 processed', color: '#16a34a' },
+  { date: 'Mar 1, 11:42 AM', title: 'Dr. Patel accessed ECG records', sub: 'Apollo Hospital · Logged', color: '#f59e0b' },
+  { date: 'Feb 28', title: 'Policy renewed — HDFC Health', sub: 'Valid till Nov 2025', color: '#8b5cf6' },
 ];
 
-const vitals = [
-  { label: 'Blood Pressure', value: '120/80', unit: 'mmHg', ok: true },
-  { label: 'Heart Rate',     value: '72',     unit: 'bpm',  ok: true },
-  { label: 'Blood Glucose',  value: '98',     unit: 'mg/dL',ok: true },
-  { label: 'SpO₂',           value: '98%',    unit: '',     ok: true },
-];
 
 export default function Dashboard() {
   return (
@@ -68,15 +62,15 @@ export default function Dashboard() {
           </div>
         </div>
 
-          <div className="card" style={{ background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', border: 'none' }}>
-            <div style={{ fontSize: 11, opacity: 0.8, marginBottom: 6, fontWeight: 600 }}>HDFC HEALTH FLOATER</div>
-            <div style={{ fontFamily: 'Nunito, sans-serif', fontSize: 28, fontWeight: 800 }}>₹8,50,000</div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>Sum insured · 4 members</div>
-            <div style={{ display: 'flex', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-              <div><div style={{ fontSize: 10, opacity: 0.7 }}>RENEWAL</div><div style={{ fontSize: 13, fontWeight: 600 }}>Nov 15, 2025</div></div>
-              <div><div style={{ fontSize: 10, opacity: 0.7 }}>PREMIUM</div><div style={{ fontSize: 13, fontWeight: 600 }}>₹24,500/yr</div></div>
-            </div>
+        <div className="card" style={{ background: 'linear-gradient(135deg,#667eea,#764ba2)', color: 'white', border: 'none' }}>
+          <div style={{ fontSize: 11, opacity: 0.8, marginBottom: 6, fontWeight: 600 }}>HDFC HEALTH FLOATER</div>
+          <div style={{ fontFamily: 'Nunito, sans-serif', fontSize: 28, fontWeight: 800 }}>₹8,50,000</div>
+          <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>Sum insured · 4 members</div>
+          <div style={{ display: 'flex', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+            <div><div style={{ fontSize: 10, opacity: 0.7 }}>RENEWAL</div><div style={{ fontSize: 13, fontWeight: 600 }}>Nov 15, 2025</div></div>
+            <div><div style={{ fontSize: 10, opacity: 0.7 }}>PREMIUM</div><div style={{ fontSize: 13, fontWeight: 600 }}>₹24,500/yr</div></div>
           </div>
+        </div>
       </div>
     </div>
   );
