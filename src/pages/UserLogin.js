@@ -1,241 +1,202 @@
 import React, { useState, useEffect } from 'react';
 import './Login.css';
 
-const CORRECT_PIN = '123456';
+/* ─────────────────────────────────────────
+   WebAuthn helpers
+───────────────────────────────────────── */
 
-function FingerprintIcon({ color }) {
-  return (
-    <svg width="46" height="46" viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10"/>
-      <path d="M12 18c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6"/>
-      <path d="M12 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2"/>
-    </svg>
-  );
+// Convert base64url string → ArrayBuffer
+function b64ToBuffer(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(bin, c => c.charCodeAt(0)).buffer;
 }
 
-function FaceIcon({ color }) {
-  return (
-    <svg width="46" height="46" viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
-      <line x1="9" y1="9" x2="9.01" y2="9"/>
-      <line x1="15" y1="9" x2="15.01" y2="9"/>
-    </svg>
-  );
+// Convert ArrayBuffer → base64url string
+function bufferToB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-function CheckIcon({ size = 48, color = '#00ff88' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  );
-}
+const RP_ID   = window.location.hostname;          // e.g. "localhost"
+const RP_NAME = 'HealthVault';
+const USER_ID = 'aarav-sharma-2847';               // demo user id
+const USER_NAME = 'aarav.sharma';
 
-function DeleteIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
-      <line x1="18" y1="9" x2="12" y2="15"/>
-      <line x1="12" y1="9" x2="18" y2="15"/>
-    </svg>
-  );
-}
+// Store credential id in localStorage so same device can verify later
+const CRED_KEY = 'hv_webauthn_cred';
 
-// ── Biometric Step ───────────────────────────────────────────────────────
-function BiometricStep({ onSuccess }) {
-  const [mode, setMode]   = useState('fingerprint');
-  const [state, setState] = useState('idle');
+async function registerFingerprint() {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
 
-  const handleScan = () => {
-    if (state === 'scanning') return;
-    setState('scanning');
-    setTimeout(() => setState('success'), 2600);
+  const publicKey = {
+    challenge,
+    rp: { id: RP_ID, name: RP_NAME },
+    user: {
+      id: Uint8Array.from(USER_ID, c => c.charCodeAt(0)),
+      name: USER_NAME,
+      displayName: 'Aarav Sharma',
+    },
+    pubKeyCredParams: [
+      { type: 'public-key', alg: -7  },   // ES256
+      { type: 'public-key', alg: -257 },  // RS256
+    ],
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',   // use device built-in (Touch ID / Face ID / Windows Hello)
+      userVerification: 'required',           // forces biometric
+      residentKey: 'preferred',
+    },
+    timeout: 60000,
+    attestation: 'none',
   };
 
-  useEffect(() => {
-    if (state === 'success') {
-      const t = setTimeout(() => onSuccess(), 900);
-      return () => clearTimeout(t);
-    }
-  }, [state, onSuccess]);
+  const credential = await navigator.credentials.create({ publicKey });
 
-  const ringColor = state === 'success' ? '#00ff88' : state === 'error' ? '#ff3860' : '#00d4ff';
-  const ringBg    = state === 'success' ? 'rgba(0,255,136,0.08)' : state === 'error' ? 'rgba(255,56,96,0.08)' : 'rgba(0,212,255,0.06)';
+  // Save credential ID so we can authenticate later
+  localStorage.setItem(CRED_KEY, bufferToB64(credential.rawId));
+
+  return credential;
+}
+
+async function authenticateFingerprint() {
+  const savedCredId = localStorage.getItem(CRED_KEY);
+  const challenge   = crypto.getRandomValues(new Uint8Array(32));
+
+  const publicKey = {
+    challenge,
+    rpId: RP_ID,
+    userVerification: 'required',
+    timeout: 60000,
+    ...(savedCredId
+      ? { allowCredentials: [{ type: 'public-key', id: b64ToBuffer(savedCredId), transports: ['internal'] }] }
+      : {}),
+  };
+
+  const assertion = await navigator.credentials.get({ publicKey });
+  return assertion;
+}
+
+/* ─────────────────────────────────────────
+   Sub-components
+───────────────────────────────────────── */
+function SuccessScreen({ onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1800);
+    return () => clearTimeout(t);
+  }, [onDone]);
 
   return (
-    <div className="bio-step">
-      <div className="step-indicator">
-        <span className="step-dot step-dot--blue" />
-        <span style={{ color: '#00d4ff', fontFamily: 'monospace', fontSize: 11 }}>STEP 1 OF 2</span>
+    <div className="success-screen">
+      <div className="success-circle">✅</div>
+      <div className="success-title">Identity Verified</div>
+      <div className="success-sub">Biometric authentication successful</div>
+      <div className="success-badge">🔒 Blockchain session started</div>
+      <div style={{ marginTop: 14, color: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+        Redirecting to your dashboard…
       </div>
-
-      <div className="step-title">
-        {state === 'success' ? 'Identity Confirmed ✓' : 'Biometric Verification'}
-      </div>
-      <div className={`step-desc ${state === 'error' ? 'step-desc--error' : state === 'success' ? 'step-desc--success' : ''}`}>
-        {state === 'idle'     && 'Tap the scanner to authenticate'}
-        {state === 'scanning' && 'Hold still, reading biometric…'}
-        {state === 'success'  && 'Moving to PIN verification…'}
-        {state === 'error'    && 'Match failed — try again'}
-      </div>
-
-      <div className="mode-tabs">
-        {[
-          { key: 'fingerprint', label: 'Fingerprint' },
-          { key: 'face',        label: 'Face ID'     },
-        ].map(m => (
-          <button key={m.key}
-            className={`mode-tab ${mode === m.key ? 'mode-tab--active' : ''}`}
-            onClick={() => { setMode(m.key); setState('idle'); }}>
-            {m.key === 'fingerprint'
-              ? <FingerprintIcon color={mode === m.key ? '#00d4ff' : '#4a6fa5'} />
-              : <FaceIcon        color={mode === m.key ? '#00d4ff' : '#4a6fa5'} />}
-            {m.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="bio-ring-wrap" onClick={handleScan}
-        style={{ cursor: state === 'scanning' ? 'default' : 'pointer' }}>
-        {state === 'scanning' && (
-          <>
-            <div className="bio-pulse" />
-            <div className="bio-pulse-2" />
-          </>
-        )}
-        <div className="bio-circle"
-          style={{
-            borderColor: ringColor,
-            background:  ringBg,
-            animation:   state === 'scanning' ? 'glowPulse 1.4s ease-in-out infinite' : 'none',
-          }}>
-          {state === 'scanning' && <div className="bio-scan-line" />}
-          {state === 'success'
-            ? <div className="bio-icon-wrap--success"><CheckIcon /></div>
-            : mode === 'fingerprint'
-              ? <FingerprintIcon color={ringColor} />
-              : <FaceIcon        color={ringColor} />}
-        </div>
-      </div>
-
-      {state !== 'scanning' && state !== 'success' && (
-        <button className="auth-btn" onClick={handleScan}>
-          {state === 'error' ? 'Retry Scan' : `Scan ${mode === 'fingerprint' ? 'Fingerprint' : 'Face'}`}
-        </button>
-      )}
-      {state === 'scanning' && (
-        <p className="scanning-text">
-          <span className="spin-icon">◌</span> Analysing…
-        </p>
-      )}
-      <p className="bio-footer">256-BIT ENCRYPTED · ZERO-KNOWLEDGE PROOF</p>
     </div>
   );
 }
 
-// ── PIN Step ─────────────────────────────────────────────────────────────
-function PinStep({ onSuccess }) {
-  const [pin,    setPin]    = useState([]);
-  const [status, setStatus] = useState('idle');
-  const PIN_LEN = 6;
+/* ─────────────────────────────────────────
+   MAIN LOGIN
+───────────────────────────────────────── */
+export default function UserLogin({ onBack, onSuccess }) {
+  const [step,       setStep]       = useState('biometric'); // biometric | pin | success
+  const [bioState,   setBioState]   = useState('idle');      // idle | scanning | success | error | unsupported | notregistered
+  const [bioMsg,     setBioMsg]     = useState('');
+  const [pin,        setPin]        = useState('');
+  const [pinError,   setPinError]   = useState(false);
+  const [pinMsg,     setPinMsg]     = useState('');
+  const [shake,      setShake]      = useState(false);
+  const [mode,       setMode]       = useState('bio');       // bio | pin
 
-  const pressKey = (val) => {
-    if (status === 'success') return;
-    if (val === 'del') {
-      setPin(p => p.slice(0, -1));
-      setStatus('idle');
+  const isWebAuthnSupported = () =>
+    window.PublicKeyCredential !== undefined &&
+    typeof window.PublicKeyCredential === 'function';
+
+  const isRegistered = () => !!localStorage.getItem(CRED_KEY);
+
+  /* ── Fingerprint tap ── */
+  const handleBioTap = async () => {
+    if (!isWebAuthnSupported()) {
+      setBioState('unsupported');
+      setBioMsg('Your browser or device does not support biometric authentication. Use PIN instead.');
       return;
     }
-    if (pin.length >= PIN_LEN) return;
-    const next = [...pin, val];
-    setPin(next);
 
-    if (next.length === PIN_LEN) {
-      if (next.join('') === CORRECT_PIN) {
-        setStatus('success');
-        setTimeout(() => onSuccess(), 900);
+    setBioState('scanning');
+    setBioMsg('');
+
+    try {
+      if (!isRegistered()) {
+        // First time — register the fingerprint
+        setBioMsg('Setting up your fingerprint for the first time…');
+        await registerFingerprint();
+        setBioMsg('Fingerprint registered! Verifying now…');
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      await authenticateFingerprint();
+      setBioState('success');
+      setBioMsg('Fingerprint matched!');
+      setTimeout(() => setStep('success'), 800);
+
+    } catch (err) {
+      console.error('WebAuthn error:', err);
+
+      if (err.name === 'NotAllowedError') {
+        setBioState('error');
+        setBioMsg('Authentication cancelled or timed out. Try again.');
+      } else if (err.name === 'InvalidStateError') {
+        // Credential may be stale — clear and retry
+        localStorage.removeItem(CRED_KEY);
+        setBioState('error');
+        setBioMsg('Credential reset. Please tap again to re-register.');
+      } else if (err.name === 'NotSupportedError') {
+        setBioState('unsupported');
+        setBioMsg('Biometrics not available on this device. Use PIN.');
       } else {
-        setStatus('error');
-        setTimeout(() => { setPin([]); setStatus('idle'); }, 900);
+        setBioState('error');
+        setBioMsg(err.message || 'Biometric failed. Try again or use PIN.');
+      }
+      setTimeout(() => { if (bioState !== 'unsupported') setBioState('idle'); }, 3000);
+    }
+  };
+
+  /* ── PIN entry ── */
+  const handlePinKey = (key) => {
+    if (key === 'del') {
+      setPin(p => p.slice(0, -1));
+      setPinMsg('');
+      return;
+    }
+    const next = pin + key;
+    setPin(next);
+    if (next.length === 6) {
+      if (next === '123456') {
+        setPinError(false);
+        setStep('success');
+      } else {
+        setShake(true);
+        setPinError(true);
+        setPinMsg('Incorrect PIN. Try again.');
+        setTimeout(() => { setPin(''); setShake(false); setPinError(false); }, 900);
       }
     }
   };
 
+  /* ── Biometric state → colours ── */
+  const bioColors = {
+    idle:         { border: 'var(--border)',       bg: 'var(--surface)',   icon: '👆', glow: false },
+    scanning:     { border: '#c2410c',             bg: '#fff7ed',          icon: '👆', glow: true  },
+    success:      { border: 'var(--green)',        bg: 'var(--green-light)', icon: '✅', glow: false },
+    error:        { border: 'var(--red)',          bg: 'var(--red-light)', icon: '❌', glow: false },
+    unsupported:  { border: 'var(--yellow)',       bg: 'var(--yellow-light)', icon: '⚠️', glow: false },
+    notregistered:{ border: 'var(--border)',       bg: 'var(--surface)',   icon: '👆', glow: false },
+  };
+  const bc = bioColors[bioState] || bioColors.idle;
+
   const KEYS = ['1','2','3','4','5','6','7','8','9','','0','del'];
-
-  return (
-    <div className="pin-step">
-      <div className="step-indicator">
-        <span className="step-dot step-dot--green" />
-        <span style={{ color: '#00ff88', fontFamily: 'monospace', fontSize: 11 }}>STEP 2 OF 2</span>
-      </div>
-
-      <div className="step-title">
-        {status === 'success' ? 'Access Granted ✓' : 'Enter Your PIN'}
-      </div>
-      <div className={`step-desc ${status === 'error' ? 'step-desc--error' : status === 'success' ? 'step-desc--success' : ''}`}>
-        {status === 'idle'    && 'Enter your 6-digit secure PIN'}
-        {status === 'error'   && 'Incorrect PIN — try again'}
-        {status === 'success' && 'Welcome back, Aarav!'}
-      </div>
-
-      <div className={`pin-display ${status === 'error' ? 'pin-display--shake' : ''}`}>
-        {Array.from({ length: PIN_LEN }).map((_, i) => (
-          <div key={i} className={`pin-dot ${
-            i < pin.length
-              ? status === 'error' ? 'pin-dot--error' : 'pin-dot--filled'
-              : ''
-          }`} />
-        ))}
-      </div>
-
-      <div className="pin-grid">
-        {KEYS.map((k, i) => {
-          if (k === '') return <div key={i} className="pin-key pin-key--empty" />;
-          return (
-            <button key={i}
-              className={`pin-key ${k === 'del' ? 'pin-key--danger' : ''}`}
-              onClick={() => pressKey(k)}>
-              {k === 'del' ? <DeleteIcon /> : k}
-            </button>
-          );
-        })}
-      </div>
-      <p className="pin-hint">HINT: 1 2 3 4 5 6 (demo only)</p>
-    </div>
-  );
-}
-
-// ── Success Screen ────────────────────────────────────────────────────────
-function SuccessScreen() {
-  return (
-    <div className="success-screen">
-      <div className="success-circle">
-        <CheckIcon size={40} />
-      </div>
-      <div className="success-title">Login Successful!</div>
-      <div className="success-sub">Redirecting to your dashboard…</div>
-      <div className="success-badge">🔒 Session secured · Blockchain logged</div>
-    </div>
-  );
-}
-
-// ── Main export ───────────────────────────────────────────────────────────
-export default function UserLogin({ onBack, onSuccess }) {
-  const [step, setStep] = useState('bio');
-
-  // ✅ KEY CHANGE: when step becomes 'done', wait 1.5s then call onSuccess
-  useEffect(() => {
-    if (step === 'done') {
-      const t = setTimeout(() => onSuccess?.(), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [step, onSuccess]);
 
   return (
     <div className="login-page login-page--patient">
@@ -243,20 +204,9 @@ export default function UserLogin({ onBack, onSuccess }) {
 
         {/* Header */}
         <div className="box-header">
-          <button className="back-btn" onClick={onBack}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6"/>
-            </svg>
-            Back
-          </button>
+          <button className="back-btn" onClick={onBack}>← Back</button>
           <div className="box-logo">
-            <div className="box-logo-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-            </div>
+            <div className="box-logo-icon">🛡</div>
             <div>
               <div className="box-logo-name">HealthVault</div>
               <div className="box-logo-sub">PATIENT LOGIN</div>
@@ -264,19 +214,139 @@ export default function UserLogin({ onBack, onSuccess }) {
           </div>
         </div>
 
-        {/* Progress bar — hidden on done screen */}
-        {step !== 'done' && (
-          <div className="step-bar">
-            <div className={`step-bar-item ${step === 'bio' || step === 'pin' ? 'step-bar-item--active' : 'step-bar-item--inactive'}`} />
-            <div className={`step-bar-item ${step === 'pin' ? 'step-bar-item--active' : 'step-bar-item--inactive'}`} />
-          </div>
+        {/* Step bar */}
+        <div className="step-bar">
+          <div className={`step-bar-item ${step !== 'success' || mode === 'bio' ? 'step-bar-item--active' : 'step-bar-item--active'}`} />
+          <div className={`step-bar-item ${step === 'success' ? 'step-bar-item--active' : 'step-bar-item--inactive'}`} />
+        </div>
+
+        {/* SUCCESS */}
+        {step === 'success' && <SuccessScreen onDone={onSuccess} />}
+
+        {/* ── BIOMETRIC STEP ── */}
+        {step === 'biometric' && (
+          <>
+            {/* Mode toggle */}
+            <div className="mode-tabs">
+              <button className={`mode-tab ${mode === 'bio' ? 'mode-tab--active' : ''}`} onClick={() => setMode('bio')}>
+                👆 Fingerprint
+              </button>
+              <button className={`mode-tab ${mode === 'pin' ? 'mode-tab--active' : ''}`} onClick={() => setMode('pin')}>
+                🔢 PIN
+              </button>
+            </div>
+
+            {/* ── FINGERPRINT MODE ── */}
+            {mode === 'bio' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 6 }}>
+                  <div className="step-title">
+                    {bioState === 'scanning' ? 'Scanning…' : bioState === 'success' ? 'Verified!' : 'Biometric Login'}
+                  </div>
+                  <div className={`step-desc ${bioState === 'error' || bioState === 'unsupported' ? 'step-desc--error' : bioState === 'success' ? 'step-desc--success' : ''}`}>
+                    {bioMsg || (isRegistered()
+                      ? 'Touch the button — your device will ask for fingerprint/Face ID'
+                      : 'First time? Tap below to register your biometric')}
+                  </div>
+                </div>
+
+                {/* Fingerprint circle */}
+                <div className="bio-ring-wrap">
+                  {bioState === 'scanning' && (
+                    <>
+                      <div className="bio-pulse" />
+                      <div className="bio-pulse-2" />
+                    </>
+                  )}
+                  <div
+                    className={`bio-circle ${bioState === 'scanning' ? 'bio-circle--scanning' : ''}`}
+                    style={{ borderColor: bc.border, background: bc.bg, cursor: bioState === 'scanning' ? 'wait' : 'pointer' }}
+                    onClick={bioState === 'scanning' ? undefined : handleBioTap}
+                  >
+                    {bioState === 'scanning' && <div className="bio-scan-line" />}
+                    <div className={bioState === 'success' ? 'bio-icon-wrap--success' : ''} style={{ fontSize: 52, userSelect: 'none' }}>
+                      {bc.icon}
+                    </div>
+                  </div>
+                </div>
+
+                {/* What happens explanation */}
+                {bioState === 'idle' && (
+                  <div style={{
+                    background: 'var(--card)', border: '1px solid var(--border-light)',
+                    borderRadius: 'var(--radius-md)', padding: '14px 16px', marginBottom: 16,
+                    fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7,
+                  }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, letterSpacing: 0.5 }}>HOW IT WORKS</div>
+                    {[
+                      '🔐 Uses your device\'s built-in biometric (Touch ID / Face ID / Windows Hello)',
+                      '📱 Your fingerprint never leaves your device',
+                      '⛓ Authentication is verified on blockchain',
+                      isRegistered() ? '✅ Biometric already registered on this device' : '🆕 First tap will register your biometric',
+                    ].map((t, i) => <div key={i} style={{ marginBottom: 3 }}>{t}</div>)}
+                  </div>
+                )}
+
+                {bioState !== 'scanning' && (
+                  <button className="auth-btn" onClick={handleBioTap}>
+                    {bioState === 'error' ? '↺ Try Again' : isRegistered() ? '👆 Authenticate with Biometric' : '👆 Register & Authenticate'}
+                  </button>
+                )}
+
+                {bioState === 'scanning' && (
+                  <p className="scanning-text"><span className="spin-icon">⟳</span> Waiting for biometric confirmation…</p>
+                )}
+
+                {/* Reset option */}
+                {isRegistered() && bioState === 'idle' && (
+                  <div style={{ textAlign: 'center', marginTop: 12 }}>
+                    <button
+                      onClick={() => { localStorage.removeItem(CRED_KEY); setBioMsg('Biometric cleared. Tap to re-register.'); }}
+                      style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+                      Reset registered biometric
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── PIN MODE ── */}
+            {mode === 'pin' && (
+              <div className="pin-step">
+                <div className="step-title" style={{ textAlign: 'center' }}>Enter Your PIN</div>
+                <div className="step-desc" style={{ textAlign: 'center', marginBottom: 4 }}>Enter your 6-digit secure PIN</div>
+
+                {/* Dots */}
+                <div className={`pin-display ${shake ? 'pin-display--shake' : ''}`}>
+                  {Array(6).fill(0).map((_, i) => (
+                    <div key={i} className={`pin-dot ${i < pin.length ? (pinError ? 'pin-dot--error' : 'pin-dot--filled') : ''}`} />
+                  ))}
+                </div>
+
+                {pinMsg && <div style={{ textAlign: 'center', color: 'var(--red)', fontSize: 12, fontWeight: 600, marginBottom: 12 }}>{pinMsg}</div>}
+
+                {/* Keypad */}
+                <div className="pin-grid">
+                  {KEYS.map((k, i) => (
+                    <button
+                      key={i}
+                      className={`pin-key ${k === '' ? 'pin-key--empty' : ''} ${k === 'del' ? 'pin-key--danger' : ''}`}
+                      onClick={() => k !== '' && handlePinKey(k)}
+                      disabled={pin.length >= 6}
+                    >
+                      {k === 'del' ? '⌫' : k}
+                    </button>
+                  ))}
+                </div>
+                <div className="pin-hint">HINT: 1 2 3 4 5 6 (demo only)</div>
+              </div>
+            )}
+
+            <div className="bio-footer">
+              🔒 END-TO-END ENCRYPTED · BIOMETRIC DATA NEVER TRANSMITTED
+            </div>
+          </>
         )}
-
-        {/* Steps */}
-        {step === 'bio'  && <BiometricStep onSuccess={() => setStep('pin')} />}
-        {step === 'pin'  && <PinStep       onSuccess={() => setStep('done')} />}
-        {step === 'done' && <SuccessScreen />}
-
       </div>
     </div>
   );
