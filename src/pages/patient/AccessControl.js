@@ -1,64 +1,104 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { apiRequest } from '../../lib/api';
+import { formatDate } from '../../lib/format';
 
-const INITIAL = [
-  { id: 1, name: 'Dr. Riya Patel',  role: 'Cardiologist', org: 'Apollo',     access: 'Full Records', exp: 'Permanent',      color: '#dbeafe', letter: 'R', on: true  },
-  { id: 2, name: 'Dr. Anil Mehta',  role: 'Orthopedic',   org: 'Fortis',     access: 'X-Rays only',  exp: 'Expires Mar 31', color: '#dcfce7', letter: 'A', on: false },
-  { id: 3, name: 'Priya Sharma',    role: 'Spouse',        org: 'Family',     access: 'Emergency',    exp: 'Permanent',      color: '#f3e8ff', letter: 'P', on: true  },
-  { id: 4, name: 'Sunita Nair',     role: 'Caregiver',     org: 'Home Care',  access: 'Prescriptions',exp: 'Expires Apr 15', color: '#fef9c3', letter: 'S', on: true  },
-];
+const SCOPES = ['FULL_RECORDS', 'PRESCRIPTIONS', 'IMAGING', 'INSURANCE', 'CLAIMS'];
 
-function Toggle({ on, onChange }) {
-  return (
-    <button onClick={onChange} className={`toggle ${on ? 'toggle--on' : 'toggle--off'}`}>
-      <div className="toggle-knob" />
-    </button>
-  );
-}
+export default function AccessControl({ session, onSessionExpired }) {
+  const [grants, setGrants] = useState([]);
+  const [directory, setDirectory] = useState([]);
+  const [query, setQuery] = useState('doctor');
+  const [form, setForm] = useState({ doctorUserId: '', scope: 'FULL_RECORDS', expiresAt: '' });
+  const [error, setError] = useState('');
 
-export default function AccessControl() {
-  const [users, setUsers] = useState(INITIAL);
+  const load = async () => {
+    try {
+      const data = await apiRequest('/access-grants/me', { token: session.token });
+      setGrants(data.items || []);
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+      setError(requestError.message);
+    }
+  };
 
-  const toggle = id => setUsers(u => u.map(x => x.id === id ? { ...x, on: !x.on } : x));
-  const revoke = id => setUsers(u => u.filter(x => x.id !== id));
+  const searchDoctors = async () => {
+    try {
+      const data = await apiRequest(`/access-grants/doctors/search?q=${encodeURIComponent(query)}`, { token: session.token });
+      setDirectory(data.items || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    searchDoctors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const revoke = async (grantId) => {
+    await apiRequest(`/access-grants/me/${grantId}`, { method: 'DELETE', token: session.token });
+    load();
+  };
+
+  const create = async () => {
+    await apiRequest('/access-grants/me', {
+      method: 'POST',
+      token: session.token,
+      body: {
+        doctorUserId: form.doctorUserId,
+        scope: form.scope,
+        expiresAt: form.expiresAt || null,
+      },
+    });
+    setForm({ doctorUserId: '', scope: 'FULL_RECORDS', expiresAt: '' });
+    load();
+  };
 
   return (
     <div className="page-fade">
       <div className="section-header">
         <div>
           <div className="section-title">Access Control</div>
-          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>Manage who can view your health data</div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>Manage patient-to-doctor consent grants</div>
         </div>
-        <button className="btn btn-primary">+ Grant Access</button>
       </div>
 
-      {users.map(u => (
-        <div key={u.id} className="access-card">
-          <div className="access-avatar" style={{ background: u.color, color: '#374151' }}>{u.letter}</div>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-title">Grant access</div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input className="input" placeholder="Search doctors" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <button className="btn btn-outline" onClick={searchDoctors}>Search</button>
+          </div>
+          <select className="input" value={form.doctorUserId} onChange={(event) => setForm((current) => ({ ...current, doctorUserId: event.target.value }))}>
+            <option value="">Select a doctor</option>
+            {directory.map((doctor) => <option key={doctor.userId} value={doctor.userId}>{doctor.firstName} {doctor.lastName} · {doctor.specialty}</option>)}
+          </select>
+          <select className="input" value={form.scope} onChange={(event) => setForm((current) => ({ ...current, scope: event.target.value }))}>
+            {SCOPES.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+          </select>
+          <input className="input" type="datetime-local" value={form.expiresAt} onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))} />
+          <button className="btn btn-primary" onClick={create} disabled={!form.doctorUserId}>Create grant</button>
+        </div>
+      </div>
+
+      {error ? <div className="card" style={{ marginBottom: 18 }}>{error}</div> : null}
+
+      {grants.map((grant) => (
+        <div key={grant.id} className="access-card">
+          <div className="access-avatar" style={{ background: '#dbeafe', color: '#374151' }}>{grant.doctor?.firstName?.slice(0, 1) || 'D'}</div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div className="access-name">{u.name}</div>
-              <span className="tag tag-gray">{u.role}</span>
-            </div>
-            <div className="access-role">{u.org} · {u.access}</div>
-            <div style={{ fontSize: 11, color: u.exp.startsWith('Expires') ? '#d97706' : '#16a34a', marginTop: 4, fontWeight: 600 }}>
-              📅 {u.exp}
-            </div>
+            <div className="access-name">Dr. {grant.doctor?.firstName} {grant.doctor?.lastName}</div>
+            <div className="access-role">{grant.doctor?.specialty} · {grant.scope}</div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>Expires: {grant.expiresAt ? formatDate(grant.expiresAt) : 'No expiry'} · Status: {grant.status}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Toggle on={u.on} onChange={() => toggle(u.id)} />
-            <button className="btn btn-danger btn-sm" onClick={() => revoke(u.id)}>Revoke</button>
-          </div>
+          <button className="btn btn-danger btn-sm" onClick={() => revoke(grant.id)}>Revoke</button>
         </div>
       ))}
-
-      <div className="card" style={{ marginTop: 20, background: '#f8f7ff', border: '1.5px dashed #c7d2fe' }}>
-        <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>➕</div>
-          <div style={{ fontWeight: 600, color: '#374151' }}>Grant new access</div>
-          <div style={{ fontSize: 13, color: '#9ca3af', margin: '4px 0 16px' }}>Share your records with a doctor or family member</div>
-          <button className="btn btn-primary">Add Person</button>
-        </div>
-      </div>
     </div>
   );
 }

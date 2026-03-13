@@ -1,76 +1,150 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { apiRequest, downloadFile } from '../../lib/api';
+import { formatDate } from '../../lib/format';
 
-const DOCS = [
-  { name: 'CBC Blood Report',      date: 'Feb 28, 2025', type: 'Lab',     size: '2.4 MB', verified: true,  icon: '🧪', color: '#dbeafe' },
-  { name: 'Chest X-Ray',           date: 'Feb 15, 2025', type: 'Imaging', size: '8.1 MB', verified: true,  icon: '🩻', color: '#f3e8ff' },
-  { name: 'Echocardiogram',        date: 'Jan 30, 2025', type: 'Cardio',  size: '1.8 MB', verified: true,  icon: '❤️', color: '#fff0f0' },
-  { name: 'Dr. Patel Prescription',date: 'Jan 22, 2025', type: 'Rx',      size: '0.4 MB', verified: false, icon: '💊', color: '#fef9c3' },
-  { name: 'Diabetes Panel',        date: 'Dec 10, 2024', type: 'Lab',     size: '1.2 MB', verified: true,  icon: '🧪', color: '#dbeafe' },
-  { name: 'MRI Brain Scan',        date: 'Nov 5, 2024',  type: 'Imaging', size: '24 MB',  verified: true,  icon: '🩻', color: '#f3e8ff' },
-];
+const FILTERS = ['ALL', 'REPORT', 'PRESCRIPTION', 'LAB_RESULT', 'IMAGING', 'DISCHARGE_SUMMARY', 'OTHER'];
 
-const FILTERS = ['All', 'Lab', 'Imaging', 'Rx', 'Cardio'];
+export default function MedicalRecords({ session, onSessionExpired }) {
+  const [filter, setFilter] = useState('ALL');
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [form, setForm] = useState({ title: '', recordType: 'REPORT', description: '' });
+  const fileRef = useRef(null);
 
-export default function MedicalRecords() {
-  const [filter, setFilter] = useState('All');
+  const loadRecords = async (nextFilter = filter) => {
+    setLoading(true);
+    setError('');
 
-  const filtered = filter === 'All' ? DOCS : DOCS.filter(d => d.type === filter);
+    try {
+      const query = nextFilter === 'ALL' ? '' : `?recordType=${encodeURIComponent(nextFilter)}`;
+      const data = await apiRequest(`/patients/me/records${query}`, { token: session.token });
+      setRecords(data.items || []);
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecords(filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
+  const submitUpload = async () => {
+    const files = fileRef.current?.files;
+
+    if (!files?.length || !form.title.trim()) {
+      setError('Title and at least one file are required.');
+      return;
+    }
+
+    setUploading(true);
+    setError('');
+
+    const payload = new FormData();
+    payload.append('title', form.title);
+    payload.append('recordType', form.recordType);
+    payload.append('description', form.description);
+
+    Array.from(files).forEach((file) => payload.append('files', file));
+
+    try {
+      await apiRequest('/patients/me/records', {
+        method: 'POST',
+        token: session.token,
+        body: payload,
+      });
+      setForm({ title: '', recordType: 'REPORT', description: '' });
+      fileRef.current.value = '';
+      await loadRecords(filter);
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+
+      setError(requestError.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const summary = useMemo(() => `${records.length} records loaded from the backend`, [records.length]);
 
   return (
     <div className="page-fade">
       <div className="section-header">
         <div>
           <div className="section-title">My Medical Records</div>
-          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>47 documents · All blockchain-sealed</div>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-outline">📷 Scan Doc</button>
-          <button className="btn btn-primary">⬆️ Upload</button>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>{summary}</div>
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {FILTERS.map(f => (
-          <button key={f} onClick={() => setFilter(f)}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {FILTERS.map((item) => (
+          <button
+            key={item}
+            onClick={() => setFilter(item)}
             style={{
-              padding: '7px 16px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: filter === f ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'white',
-              color: filter === f ? 'white' : '#6b7280',
-              fontWeight: filter === f ? 700 : 400, fontSize: 13,
-              boxShadow: filter === f ? '0 2px 8px rgba(102,126,234,0.3)' : '0 1px 4px rgba(0,0,0,0.06)',
-              transition: 'all 0.2s',
-            }}>
-            {f}
+              padding: '7px 16px',
+              borderRadius: 20,
+              border: 'none',
+              cursor: 'pointer',
+              background: filter === item ? 'linear-gradient(135deg,#667eea,#764ba2)' : 'white',
+              color: filter === item ? 'white' : '#6b7280',
+            }}
+          >
+            {item === 'ALL' ? 'All' : item}
           </button>
         ))}
       </div>
 
-      {/* Document grid */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-title">Upload a record</div>
+        <div className="card-sub">This uses the live multipart upload endpoint.</div>
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          <input className="input" placeholder="Record title" value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />
+          <select className="input" value={form.recordType} onChange={(event) => setForm((current) => ({ ...current, recordType: event.target.value }))}>
+            {FILTERS.filter((item) => item !== 'ALL').map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+          <textarea className="input" placeholder="Description" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+          <input ref={fileRef} type="file" multiple />
+          <button className="btn btn-primary" onClick={submitUpload} disabled={uploading}>{uploading ? 'Uploading...' : 'Upload record'}</button>
+        </div>
+      </div>
+
+      {error ? <div className="card" style={{ marginBottom: 18 }}>{error}</div> : null}
+      {loading ? <div className="card">Loading records...</div> : null}
+
       <div className="grid-3" style={{ gap: 14 }}>
-        {filtered.map((doc, i) => (
-          <div key={i} className="doc-card">
-            <div className="doc-icon" style={{ background: doc.color }}>{doc.icon}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div className="doc-name">{doc.name}</div>
-                <div className="doc-meta">{doc.date} · {doc.size}</div>
-              </div>
-              <span className={`tag ${doc.verified ? 'tag-green' : 'tag-yellow'}`}>
-                {doc.verified ? '✓ Verified' : '⏳ Pending'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              {doc.verified && (
-                <span style={{ fontSize: 10, color: '#16a34a', background: '#f0fdf4', padding: '3px 8px', borderRadius: 6, fontWeight: 600 }}>
-                  ⛓ Blockchain
-                </span>
-              )}
-              <span className="tag tag-gray">{doc.type}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>👁 View</button>
-              <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>⬇️ Save</button>
+        {records.map((record) => (
+          <div key={record.id} className="doc-card">
+            <div className="doc-name">{record.title}</div>
+            <div className="doc-meta">{formatDate(record.createdAt)} · {record.recordType}</div>
+            <span className="tag tag-gray">{record.verificationStatus}</span>
+            <div style={{ marginTop: 12 }}>
+              {record.files.map((file) => (
+                <div key={file.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+                  <span style={{ fontSize: 12 }}>{file.originalName}</span>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => downloadFile(`/patients/me/records/${record.id}/files/${file.id}/download`, {
+                      token: session.token,
+                      filename: file.originalName,
+                    })}
+                  >
+                    Download
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         ))}
