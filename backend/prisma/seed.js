@@ -427,20 +427,7 @@ async function main() {
     },
   });
 
-  await prisma.webAuthnCredential.upsert({
-    where: { credentialId: "seed-webauthn-credential-1" },
-    update: {
-      userId: patientUser.id,
-      publicKey: "seed-public-key",
-      transports: ["internal"],
-    },
-    create: {
-      userId: patientUser.id,
-      credentialId: "seed-webauthn-credential-1",
-      publicKey: "seed-public-key",
-      transports: ["internal"],
-    },
-  });
+
 
   const conversation = await prisma.aIConversation.upsert({
     where: { id: seedIds.aiConversation },
