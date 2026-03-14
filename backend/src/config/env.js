@@ -80,12 +80,7 @@ const config = {
     url: getEnv("REDIS_URL", "redis://localhost:6379"),
   },
   storage: {
-    endpoint: getEnv("S3_ENDPOINT", "http://localhost:9000"),
-    port: getNumber("S3_PORT", "9000"),
-    accessKey: getEnv("S3_ACCESS_KEY", "minioadmin"),
-    secretKey: getEnv("S3_SECRET_KEY", "minioadmin"),
-    bucket: getEnv("S3_BUCKET", "hacksamrat-dev"),
-    region: getEnv("S3_REGION", "us-east-1"),
+    cloudinaryUrl: getEnv("CLOUDINARY_URL", "cloudinary://API_KEY:API_SECRET@CLOUD_NAME"),
   },
 };
 
