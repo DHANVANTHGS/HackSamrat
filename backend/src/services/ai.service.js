@@ -12,77 +12,78 @@ const buildConversationTitle = (message) => {
   return normalized.slice(0, 60) || "Patient support chat";
 };
 
-const summarizePolicy = (policy) =>
-  `${policy.providerName} ${policy.planName} policy ${policy.policyNumber} is valid until ${new Date(policy.validTo).toLocaleDateString('en-IN')} with coverage ${policy.coverageLimit} and used coverage ${policy.usedCoverage}.`;
+const { GoogleGenAI } = require("@google/genai");
 
-const summarizeClaim = (claim) => {
-  const payout = claim.payoutAmount ? ` Payout amount is ${claim.payoutAmount}.` : "";
-  const insurer = claim.insurerDecision ? ` Insurer decision is ${claim.insurerDecision}.` : "";
-  return `Claim ${claim.claimNumber} for ${claim.title} is currently ${claim.status}.${insurer}${payout}`;
-};
-
-const buildGroundedAnswer = ({ question, policies, claims }) => {
-  const lowered = question.toLowerCase();
+const buildGroundedAnswer = async ({ question, policies, claims, messageHistory }) => {
   const context = {
     policyIds: policies.map((policy) => policy.id),
     claimIds: claims.map((claim) => claim.id),
     retrievalSources: [],
   };
 
-  if (/(claim|reimburse|status|payout|insurer)/.test(lowered)) {
-    context.retrievalSources.push("claims");
-
-    if (!claims.length) {
-      return {
-        answer: "I could not find any claims in your account right now. I can help once a claim exists in your backend records.",
-        context,
-      };
-    }
-
-    const claimMentions = claims.slice(0, 3).map(summarizeClaim).join(" ");
+  if (!process.env.GEMINI_API_KEY) {
     return {
-      answer: `Based on your saved claim data: ${claimMentions}`,
+      answer: "I am currently not connected to an LLM. Please ask your administrator to add `GEMINI_API_KEY` to the backend `.env` file and restart the server.",
       context,
     };
   }
 
-  if (/(policy|insurance|benefit|coverage|premium|renewal)/.test(lowered)) {
-    context.retrievalSources.push("insurance");
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    if (!policies.length) {
-      return {
-        answer: "I could not find any insurance policy data in your account right now.",
-        context,
-      };
-    }
+    if (policies.length) context.retrievalSources.push("insurance");
+    if (claims.length) context.retrievalSources.push("claims");
 
-    const activePolicies = policies.filter((policy) => new Date(policy.validTo) >= new Date());
-    const sourcePolicies = activePolicies.length ? activePolicies : policies;
-    const policySummary = sourcePolicies.slice(0, 2).map(summarizePolicy).join(" ");
+    const systemInstruction = `
+You are the HackSamrat HealthVault AI Assistant, an expert healthcare advisor for patients in India. Your role is twofold:
+1. Answer patient questions strictly grounded in their specific backend medical, insurance, and claim records (provided below).
+2. Educate the user about relevant government health schemes (e.g., Ayushman Bharat / PM-JAY, CGHS, state-specific schemes) and private health insurance options available across India that they might benefit from.
+
+Here is the user's active data:
+---
+POLICIES:
+${JSON.stringify(policies, null, 2)}
+
+CLAIMS:
+${JSON.stringify(claims, null, 2)}
+---
+
+CRITICAL RULES:
+1. When answering questions about the user's *existing* coverage, records, or claims, you MUST ONLY use the exact backend data provided above.
+2. When asked about new policies, better schemes, or general healthcare, use your comprehensive knowledge of the Indian healthcare system to provide accurate, up-to-date recommendations.
+3. Proactively suggest a relevant Indian scheme if the user's context (like lacking insurance or having high claim rejections) implies they need better coverage.
+4. Be professional, concise, and helpful. Do not hallucinate or make up backend data.
+5. Format your responses in simple markdown.
+`;
+
+    const formattedHistory = (messageHistory || []).map((msg) => ({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    }));
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        ...formattedHistory,
+        { role: "user", parts: [{ text: question }] }
+      ],
+      config: {
+        systemInstruction,
+        temperature: 0.1, // Keep it deterministic
+      }
+    });
 
     return {
-      answer: `Based on your saved insurance data: ${policySummary}`,
+      answer: response.text || "I was unable to formulate a response.",
+      context,
+    };
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return {
+      answer: "I encountered an error connecting to my AI brain. Please try again later.",
       context,
     };
   }
-
-  if (policies.length || claims.length) {
-    context.retrievalSources.push("claims", "insurance");
-    const latestClaim = claims[0] ? summarizeClaim(claims[0]) : null;
-    const latestPolicy = policies[0] ? summarizePolicy(policies[0]) : null;
-    const parts = [latestPolicy, latestClaim].filter(Boolean).join(" ");
-
-    return {
-      answer: `I can answer questions grounded in your insurance and claims data only. Here is the most relevant information I found: ${parts}`,
-      context,
-    };
-  }
-
-  return {
-    answer:
-      "I can only answer using your insurance policies, benefits, and claim records that are stored in this backend. I could not find relevant grounded data for your question.",
-    context,
-  };
 };
 
 const aiService = {
@@ -120,10 +121,18 @@ const aiService = {
       },
     });
 
-    const grounded = buildGroundedAnswer({
+    await aiRepository.touchConversation(
+      conversation.id,
+      conversation.title || buildConversationTitle(message),
+    );
+
+    let persistedConversation = await aiRepository.getConversationForPatient(conversation.id, userId, patient.id);
+
+    const grounded = await buildGroundedAnswer({
       question: message,
       policies,
       claims,
+      messageHistory: persistedConversation.messages.slice(-MAX_HISTORY_MESSAGES),
     });
 
     const assistantMessage = await aiRepository.appendMessage(conversation.id, {
@@ -134,15 +143,11 @@ const aiService = {
         retrieval: grounded.context,
         safeguards: {
           groundedOnly: true,
-          externalModelUsed: false,
+          externalModelUsed: true,
+          model: "gemini-2.5-flash",
         },
       },
     });
-
-    await aiRepository.touchConversation(
-      conversation.id,
-      conversation.title || buildConversationTitle(message),
-    );
 
     await auditService.logEvent({
       actorUserId: userId,
@@ -160,7 +165,7 @@ const aiService = {
       userAgent: requestContext.userAgent,
     });
 
-    const persistedConversation = await aiRepository.getConversationForPatient(conversation.id, userId, patient.id);
+    persistedConversation = await aiRepository.getConversationForPatient(conversation.id, userId, patient.id);
 
     return {
       conversationId: conversation.id,

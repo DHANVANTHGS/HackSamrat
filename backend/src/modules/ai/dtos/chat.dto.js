@@ -9,7 +9,7 @@ const assertAiChatDto = (body) =>
       isObject(value) &&
       typeof value.message === "string" &&
       value.message.trim().length > 0 &&
-      (value.conversationId === undefined || typeof value.conversationId === "string"),
+      (value.conversationId === undefined || value.conversationId === null || typeof value.conversationId === "string"),
     "AI chat requires a message and an optional conversationId.",
   );
 

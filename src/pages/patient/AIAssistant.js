@@ -4,8 +4,8 @@ import { formatDateTime } from '../../lib/format';
 
 const SUGGESTIONS = [
   'What is my current claim status?',
-  'Summarize my insurance coverage.',
   'What benefits have I used?',
+  'Am I eligible for any Indian Govt health schemes?',
 ];
 
 export default function AIAssistant({ session, onSessionExpired }) {
