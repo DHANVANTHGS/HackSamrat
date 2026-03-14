@@ -10,6 +10,11 @@ const server = app.listen(config.port, () => {
   });
 });
 
+// Debug: Keep the event loop alive to see if the server responds
+setInterval(() => {
+  // console.log("Keep-alive heartbeat...");
+}, 5000);
+
 process.on('exit', (code) => {
   console.log(`Process about to exit with code: ${code}`);
   console.trace("Exit stack trace:");

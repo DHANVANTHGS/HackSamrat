@@ -5,6 +5,7 @@
     "description": "Backend workspace for HackSamrat",
     "main": "src/main.js",
     "scripts": {
+        "postinstall": "prisma generate",
         "db:check": "node src/db/check.js",
         "db:bootstrap": "prisma generate && prisma migrate deploy && node prisma/seed.js",
         "dev": "nodemon --watch src --ext js --exec node src/main.js",
