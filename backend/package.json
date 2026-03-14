@@ -16,7 +16,6 @@
         "prisma:migrate:deploy": "prisma migrate deploy",
         "prisma:migrate:status": "prisma migrate status",
         "prisma:seed": "node prisma/seed.js",
-        "postinstall": "prisma generate",
         "start": "node src/main.js",
         "test": "node --test test/**/*.test.js"
     },
