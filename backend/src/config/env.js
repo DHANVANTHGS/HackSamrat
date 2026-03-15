@@ -42,7 +42,7 @@ const config = {
   apiPrefix: getEnv("API_PREFIX", "/api/v1"),
   logLevel: getEnv("LOG_LEVEL", "info"),
   security: {
-    corsAllowedOrigins: getCsv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
+    corsAllowedOrigins: getCsv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,https://hack-samrat-rlhr.vercel.app"),
     enableMetrics: getBoolean("ENABLE_METRICS", "true"),
     adminAuditToken: getEnv("ADMIN_AUDIT_TOKEN", "replace-me"),
   },
@@ -53,8 +53,8 @@ const config = {
     webauthnChallengeTtlMinutes: getNumber("AUTH_WEBAUTHN_CHALLENGE_TTL_MINUTES", "5"),
     webauthn: {
       rpName: getEnv("AUTH_WEBAUTHN_RP_NAME", "HackSamrat"),
-      rpId: getEnv("AUTH_WEBAUTHN_RP_ID", "localhost"),
-      origin: getEnv("AUTH_WEBAUTHN_ORIGIN", "http://localhost:3000"),
+      rpId: getEnv("AUTH_WEBAUTHN_RP_ID", "hack-samrat-rlhr.vercel.app"),
+      origin: getEnv("AUTH_WEBAUTHN_ORIGIN", "https://hack-samrat-rlhr.vercel.app"),
     },
   },
   blockchain: {
@@ -80,12 +80,7 @@ const config = {
     url: getEnv("REDIS_URL", "redis://localhost:6379"),
   },
   storage: {
-    endpoint: getEnv("S3_ENDPOINT", "http://localhost:9000"),
-    port: getNumber("S3_PORT", "9000"),
-    accessKey: getEnv("S3_ACCESS_KEY", "minioadmin"),
-    secretKey: getEnv("S3_SECRET_KEY", "minioadmin"),
-    bucket: getEnv("S3_BUCKET", "hacksamrat-dev"),
-    region: getEnv("S3_REGION", "us-east-1"),
+    cloudinaryUrl: getEnv("CLOUDINARY_URL", "cloudinary://API_KEY:API_SECRET@CLOUD_NAME"),
   },
 };
 

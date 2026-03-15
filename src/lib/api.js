@@ -1,6 +1,10 @@
 const STORAGE_KEY = "hv_app_session";
 
-const getApiBaseUrl = () => process.env.REACT_APP_API_BASE_URL || "http://localhost:5000/api/v1";
+const getApiBaseUrl = () => {
+  if (process.env.REACT_APP_API_BASE_URL) return process.env.REACT_APP_API_BASE_URL;
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") return "http://localhost:5000/api/v1";
+  return "https://mediledger-wdpu.onrender.com/api/v1";
+};
 
 const parseJsonSafely = async (response) => {
   const text = await response.text();

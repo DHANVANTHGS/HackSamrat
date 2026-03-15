@@ -5,6 +5,7 @@
     "description": "Backend workspace for HackSamrat",
     "main": "src/main.js",
     "scripts": {
+        "postinstall": "prisma generate",
         "db:check": "node src/db/check.js",
         "db:bootstrap": "prisma generate && prisma migrate deploy && node prisma/seed.js",
         "dev": "nodemon --watch src --ext js --exec node src/main.js",
@@ -31,9 +32,12 @@
         "@prisma/client": "^7.5.0",
         "@simplewebauthn/server": "^13.3.0",
         "bcryptjs": "^3.0.3",
+        "cloudinary": "^1.41.3",
         "dotenv": "^17.3.1",
+        "ethers": "^6.16.0",
         "express": "^5.1.0",
         "multer": "^2.1.1",
+        "multer-storage-cloudinary": "^4.0.0",
         "nodemon": "^3.1.14",
         "pg": "^8.20.0",
         "prisma": "^7.5.0"

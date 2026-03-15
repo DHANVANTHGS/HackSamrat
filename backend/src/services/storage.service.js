@@ -1,116 +1,87 @@
-const crypto = require("crypto");
+const { v2: cloudinary } = require("cloudinary");
 const { Readable } = require("stream");
-const { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
 
 const { config } = require("../config/env");
-const { AppError } = require("../lib/errors");
 
-const forcePathStyle = config.storage.endpoint.includes("localhost") || config.storage.endpoint.includes("127.0.0.1");
+// Manually parse CLOUDINARY_URL to ensure credentials are set correctly
+const parseCloudinaryUrl = (url) => {
+  try {
+    const regex = /cloudinary:\/\/([^:]+):([^@]+)@(.+)/;
+    const matches = url.match(regex);
+    if (matches) {
+      return {
+        api_key: matches[1],
+        api_secret: matches[2],
+        cloud_name: matches[3],
+      };
+    }
+  } catch (e) {
+    console.error("Failed to parse CLOUDINARY_URL", e);
+  }
+  return {};
+};
 
-const client = new S3Client({
-  region: config.storage.region,
-  endpoint: config.storage.endpoint,
-  forcePathStyle,
-  credentials: {
-    accessKeyId: config.storage.accessKey,
-    secretAccessKey: config.storage.secretKey,
-  },
+const cloudConfig = parseCloudinaryUrl(config.storage.cloudinaryUrl);
+
+cloudinary.config({
+  ...cloudConfig,
+  secure: true
 });
 
-let bucketReadyPromise;
-
-const ensureBucket = async () => {
-  if (!bucketReadyPromise) {
-    bucketReadyPromise = (async () => {
-      try {
-        await client.send(new HeadBucketCommand({ Bucket: config.storage.bucket }));
-      } catch (error) {
-        const statusCode = error?.$metadata?.httpStatusCode;
-        const code = error?.name || error?.Code;
-        const shouldCreate = statusCode === 404 || code === "NotFound" || code === "NoSuchBucket";
-
-        if (!shouldCreate) {
-          throw error;
-        }
-
-        await client.send(
-          new CreateBucketCommand({
-            Bucket: config.storage.bucket,
-          }),
-        );
-      }
-    })().catch((error) => {
-      bucketReadyPromise = null;
-      throw new AppError("Object storage bucket is unavailable.", 503, "STORAGE_UNAVAILABLE", {
-        message: error.message,
-      });
-    });
-  }
-
-  return bucketReadyPromise;
-};
-
-const toNodeStream = (body) => {
-  if (!body) {
-    throw new AppError("Stored file body is empty.", 500, "FILE_STREAM_ERROR");
-  }
-
-  if (typeof body.pipe === "function") {
-    return body;
-  }
-
-  if (typeof body.transformToWebStream === "function") {
-    return Readable.fromWeb(body.transformToWebStream());
-  }
-
-  throw new AppError("Unsupported file stream response.", 500, "FILE_STREAM_ERROR");
-};
-
-const buildStorageKey = (folder, scopeId, originalName) => {
-  const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "-");
-  return `${folder}/${scopeId}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
-};
-
 const storageService = {
-  async uploadBuffer({ key, buffer, mimeType, checksumSha256 }) {
-    await ensureBucket();
-
-    await client.send(
-      new PutObjectCommand({
-        Bucket: config.storage.bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: mimeType,
-        Metadata: {
-          checksumsha256: checksumSha256,
+  async uploadBuffer({ key, buffer, mimeType }) {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: key, // Use our key as the public_id
+          resource_type: "auto",
         },
-      }),
-    );
+        (error, result) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        }
+      );
+
+      // Write buffer to stream
+      uploadStream.end(buffer);
+    });
   },
 
   async getFile(key) {
-    await ensureBucket();
+    // Attempt to fetch as image first, then raw if that fails.
+    // In a production environment, we'd store the resource_type in the DB.
+    const types = ["image", "raw", "video"];
 
-    const response = await client.send(
-      new GetObjectCommand({
-        Bucket: config.storage.bucket,
-        Key: key,
-      }),
-    );
+    for (const type of types) {
+      const url = cloudinary.url(key, { secure: true, resource_type: type });
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          return {
+            stream: response.body ? Readable.fromWeb(response.body) : null,
+            contentType: response.headers.get("content-type"),
+            contentLength: Number(response.headers.get("content-length")),
+          };
+        }
+      } catch (e) {
+        // Continue to next type
+      }
+    }
 
-    return {
-      stream: toNodeStream(response.Body),
-      contentType: response.ContentType,
-      contentLength: response.ContentLength,
-    };
+    throw new Error(`Failed to fetch file from Cloudinary for key: ${key}`);
   },
 
   buildRecordStorageKey(patientCode, originalName) {
-    return buildStorageKey("records", patientCode, originalName);
+    const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "-");
+    return `records/${patientCode}/${Date.now()}-${safeName}`;
   },
 
   buildClaimStorageKey(claimNumber, originalName) {
-    return buildStorageKey("claims", claimNumber, originalName);
+    const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "-");
+    return `claims/${claimNumber}/${Date.now()}-${safeName}`;
   },
 };
 
